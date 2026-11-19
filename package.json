@@ -1,0 +1,66 @@
+{
+  "name": "marca-de-agua",
+  "productName": "Marca de Agua",
+  "version": "1.0.0",
+  "description": "Aplica marca de agua a imágenes por lotes, en local.",
+  "main": "src/main.js",
+  "author": "Applexby",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-icon.js",
+    "dist": "electron-builder --win --publish never",
+    "release": "electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.applexby.marcadeagua",
+    "productName": "Marca de Agua",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/sharp/**",
+      "node_modules/@img/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "MarcaDeAgua-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Marca de Agua"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Applexby",
+        "repo": "Marca-de-agua",
+        "releaseType": "release"
+      }
+    ]
+  }
+}
