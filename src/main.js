@@ -5,8 +5,8 @@ const fs = require('fs');
 const fsp = fs.promises;
 const sharp = require('sharp');
 const { autoUpdater } = require('electron-updater');
+const P = require('./processor');
 
-const { mapLimit, scanFolder, exportOne } = require('./processor');
 let win = null;
 
 protocol.registerSchemesAsPrivileged([
@@ -22,51 +22,77 @@ function writeConfig(cfg) {
   try { fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2)); } catch (e) { console.error(e); }
 }
 
-// ---------- Previews (protocolo wm://img/?p=<ruta>&s=<tamaño>) ----------
+// ---------- Previews: wm://img/?p=<ruta>&s=<tamaño> ----------
+// s=0 en fotos = archivo original sin recomprimir (para comparar al 100%)
 const previewCache = new Map();
 const CACHE_MAX = 400;
+const BROWSER_NATIVE = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+const durations = new Map();
+
 async function makePreview(p, size) {
   const key = p + '|' + size;
   if (previewCache.has(key)) return previewCache.get(key);
-  let img = sharp(p, { failOn: 'none' }).rotate();
-  if (size > 0) img = img.resize({ width: size, height: size, fit: 'inside', withoutEnlargement: true });
-  const buf = await img.webp({ quality: size > 1000 ? 88 : 78 }).toBuffer();
-  previewCache.set(key, buf);
+  let out;
+  if (P.kindOf(p) === 'video') {
+    if (!durations.has(p)) durations.set(p, (await P.probeVideo(p)).duration);
+    out = { buf: await P.videoFrame(p, size, durations.get(p)), type: 'image/jpeg' };
+  } else if (size === 0 && BROWSER_NATIVE.has(path.extname(p).toLowerCase())) {
+    out = { buf: await fsp.readFile(p), type: 'image/' + (path.extname(p).toLowerCase() === '.png' ? 'png' : path.extname(p).toLowerCase() === '.webp' ? 'webp' : 'jpeg') };
+    return out; // no se cachea (puede ser grande)
+  } else {
+    let img = sharp(p, { failOn: 'none', limitInputPixels: false }).rotate();
+    if (size > 0) img = img.resize({ width: size, height: size, fit: 'inside', withoutEnlargement: true });
+    out = size === 0 ? { buf: await img.png().toBuffer(), type: 'image/png' }
+      : { buf: await img.webp({ quality: size > 1000 ? 88 : 78 }).toBuffer(), type: 'image/webp' };
+  }
+  previewCache.set(key, out);
   if (previewCache.size > CACHE_MAX) previewCache.delete(previewCache.keys().next().value);
-  return buf;
+  return out;
 }
 
 function registerProtocol() {
   protocol.handle('wm', async (req) => {
     try {
       const u = new URL(req.url);
-      const p = u.searchParams.get('p');
-      const s = parseInt(u.searchParams.get('s') || '0', 10);
-      const buf = await makePreview(p, s);
-      return new Response(buf, { headers: { 'content-type': 'image/webp' } });
+      const r = await makePreview(u.searchParams.get('p'), parseInt(u.searchParams.get('s') || '0', 10));
+      return new Response(r.buf, { headers: { 'content-type': r.type } });
     } catch (e) {
       return new Response('error', { status: 500 });
     }
   });
 }
 
+// ---------- Rutas de salida (respeta subcarpetas) ----------
+function outBaseFor(item, outDir, used) {
+  const dir = path.join(outDir, ...(item.relDir ? item.relDir.split('/') : []));
+  let base = path.join(dir, path.parse(item.name).name);
+  if (path.resolve(base).toLowerCase() === path.resolve(item.path.slice(0, -path.extname(item.path).length)).toLowerCase()) base += '_export';
+  let candidate = base, n = 2;
+  while (used.has(candidate.toLowerCase())) candidate = `${base}_${n++}`;
+  used.add(candidate.toLowerCase());
+  return { dir, base: candidate };
+}
+
 // ---------- IPC ----------
+let currentAbort = null;
+
 function registerIpc() {
   ipcMain.handle('app-version', () => app.getVersion());
   ipcMain.handle('config-load', () => readConfig());
   ipcMain.handle('config-save', (_e, cfg) => writeConfig(cfg));
+  ipcMain.handle('has-ffmpeg', () => !!P.FFMPEG && fs.existsSync(P.FFMPEG));
 
   ipcMain.handle('pick-folder', async () => {
-    const r = await dialog.showOpenDialog(win, { title: 'Elegir carpeta de imágenes', properties: ['openDirectory'] });
+    const r = await dialog.showOpenDialog(win, { title: 'Elegir carpeta (se incluyen las subcarpetas)', properties: ['openDirectory'] });
     if (r.canceled || !r.filePaths[0]) return null;
-    return scanFolder(r.filePaths[0]);
+    return r.filePaths[0];
   });
 
-  ipcMain.handle('scan-folder', async (_e, dir) => {
+  ipcMain.handle('scan-folder', async (_e, dir, skip) => {
     try {
       const st = await fsp.stat(dir);
       if (!st.isDirectory()) dir = path.dirname(dir);
-      return await scanFolder(dir);
+      return await P.scanFolder(dir, skip);
     } catch { return null; }
   });
 
@@ -79,38 +105,66 @@ function registerIpc() {
     if (r.canceled || !r.filePaths[0]) return null;
     return loadWatermark(r.filePaths[0]);
   });
-
-  ipcMain.handle('load-watermark', async (_e, p) => {
-    try { return await loadWatermark(p); } catch { return null; }
-  });
+  ipcMain.handle('load-watermark', async (_e, p) => { try { return await loadWatermark(p); } catch { return null; } });
 
   ipcMain.handle('pick-output', async (_e, defaultPath) => {
-    const r = await dialog.showOpenDialog(win, {
-      title: 'Carpeta de salida', defaultPath, properties: ['openDirectory', 'createDirectory']
-    });
+    const r = await dialog.showOpenDialog(win, { title: 'Carpeta de salida', defaultPath, properties: ['openDirectory', 'createDirectory'] });
     if (r.canceled || !r.filePaths[0]) return null;
     return r.filePaths[0];
   });
 
   ipcMain.handle('open-path', (_e, p) => shell.openPath(p));
 
+  // Vista previa de cómo queda una foto exportada (para comparar calidad / peso)
+  ipcMain.handle('preview-image', async (_e, item, job) => {
+    const r = await P.renderImage(item, job);
+    const type = job.photo.format === 'png' ? 'image/png' : 'image/jpeg';
+    return { url: `data:${type};base64,${r.buf.toString('base64')}`, bytes: r.buf.length, quality: r.quality, width: r.width, height: r.height };
+  });
+
+  ipcMain.handle('estimate-video', async (_e, item, job) => {
+    try { return await P.estimateVideo(item, job); } catch (err) { return { error: String(err.message || err) }; }
+  });
+
+  ipcMain.handle('export-cancel', () => { if (currentAbort) currentAbort.abort(); });
+
   ipcMain.handle('export', async (e, job) => {
-    await fsp.mkdir(job.outDir, { recursive: true });
-    let done = 0;
+    const abort = new AbortController();
+    currentAbort = abort;
+    const used = new Set();
+    const plan = job.items.map((it) => ({ it, ...outBaseFor(it, job.outDir, used) }));
+    const total = plan.length;
+    let done = 0, inBytes = 0, outBytes = 0;
     const errors = [];
-    const total = job.items.length;
-    await mapLimit(job.items, 2, async (item) => {
-      try { await exportOne(item, job); } catch (err) { errors.push({ name: item.name, message: String(err.message || err) }); }
+    const send = (d) => { if (!e.sender.isDestroyed()) e.sender.send('export-progress', { total, done, ...d }); };
+
+    const runOne = async ({ it, dir, base }) => {
+      if (abort.signal.aborted) return;
+      send({ name: it.rel, frac: 0 });
+      try {
+        await fsp.mkdir(dir, { recursive: true });
+        const r = it.kind === 'video'
+          ? await P.exportVideo(it, job, base, { signal: abort.signal, onProgress: (f) => send({ name: it.rel, frac: f }) })
+          : await P.exportImage(it, job, base);
+        inBytes += it.bytes || 0; outBytes += r.bytes;
+      } catch (err) {
+        if (!abort.signal.aborted) errors.push({ name: it.rel, message: String(err.message || err) });
+      }
       done++;
-      e.sender.send('export-progress', { done, total, name: item.name });
-    });
-    return { done, errors, outDir: job.outDir };
+      send({ name: it.rel, frac: 1 });
+    };
+
+    // Fotos de 2 en 2; videos de uno en uno (ffmpeg ya usa todos los núcleos)
+    await P.mapLimit(plan.filter((x) => x.it.kind !== 'video'), 2, runOne);
+    for (const x of plan.filter((x) => x.it.kind === 'video')) await runOne(x);
+    currentAbort = null;
+    return { done, errors, outDir: job.outDir, canceled: abort.signal.aborted, inBytes, outBytes };
   });
 
   // Actualizaciones
   ipcMain.handle('update-check', async () => {
     if (!app.isPackaged) return { state: 'dev' };
-    try { await autoUpdater.checkForUpdates(); return { state: 'checking' }; } catch (e) { return { state: 'error', message: String(e.message || e) }; }
+    try { await autoUpdater.checkForUpdates(); return { state: 'checking' }; } catch (err) { return { state: 'error', message: String(err.message || err) }; }
   });
   ipcMain.handle('update-download', () => autoUpdater.downloadUpdate());
   ipcMain.handle('update-install', () => autoUpdater.quitAndInstall(false, true));
@@ -127,7 +181,7 @@ function setupUpdater() {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.on('update-available', (info) => sendUpdate({ state: 'available', version: info.version, notes: info.releaseNotes || '' }));
+  autoUpdater.on('update-available', (info) => sendUpdate({ state: 'available', version: info.version }));
   autoUpdater.on('update-not-available', () => sendUpdate({ state: 'latest' }));
   autoUpdater.on('download-progress', (p) => sendUpdate({ state: 'downloading', percent: Math.round(p.percent) }));
   autoUpdater.on('update-downloaded', (info) => sendUpdate({ state: 'ready', version: info.version }));
@@ -140,19 +194,9 @@ function setupUpdater() {
 // ---------- Ventana ----------
 function createWindow() {
   win = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 1000,
-    minHeight: 640,
-    backgroundColor: '#1b1c1f',
-    title: 'Marca de Agua',
-    autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
+    width: 1440, height: 920, minWidth: 1050, minHeight: 660,
+    backgroundColor: '#1b1c1f', title: 'Marca de Agua', autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false }
   });
   win.removeMenu();
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -168,5 +212,5 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     setupUpdater();
   });
-  app.on('window-all-closed', () => app.quit());
+  app.on('window-all-closed', () => { if (currentAbort) currentAbort.abort(); app.quit(); });
 }

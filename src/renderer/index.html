@@ -10,8 +10,8 @@
   <header class="topbar">
     <div class="brand">Marca de Agua</div>
     <button id="btnFolder" class="btn primary">📁 Abrir carpeta</button>
-    <button id="btnLogo" class="btn">🖼 Elegir logo</button>
     <span id="folderLabel" class="muted ellipsis"></span>
+    <button id="btnRescan" class="link small hidden" title="Volver a leer la carpeta">↻ Recargar</button>
     <div class="spacer"></div>
     <label class="muted small">Miniaturas
       <input id="thumbSize" type="range" min="140" max="420" value="220" />
@@ -22,57 +22,127 @@
 
   <div class="layout">
     <aside class="sidebar">
+      <!-- MARCA DE AGUA -->
       <section>
-        <h3>Logo</h3>
-        <div id="logoPreview" class="logo-preview empty">Sin logo. Elige un PNG con fondo transparente.</div>
+        <div class="sec-head">
+          <h3>Marca de agua</h3>
+          <label class="switch" title="Desactívala para solo comprimir"><input id="wmOn" type="checkbox" checked /><span></span></label>
+        </div>
+        <div id="wmOffNote" class="note hidden">Sin marca de agua: solo se comprimen / reducen los archivos.</div>
+        <div id="wmBody">
+          <div id="logoPreview" class="logo-preview empty">Sin logo. Clic para elegir un PNG con fondo transparente.</div>
+          <div class="muted small sub">Ajuste general (todas las fotos y videos)</div>
+          <div class="field">
+            <label>Tamaño <span id="gScaleVal" class="val"></span></label>
+            <input id="gScale" type="range" min="2" max="100" value="30" />
+          </div>
+          <div class="field">
+            <label>Opacidad <span id="gOpacityVal" class="val"></span></label>
+            <input id="gOpacity" type="range" min="5" max="100" value="50" />
+          </div>
+          <div class="field">
+            <label>Margen <span id="gMarginVal" class="val"></span></label>
+            <input id="gMargin" type="range" min="0" max="20" value="3" />
+          </div>
+          <div class="field">
+            <label>Posición</label>
+            <div id="gAnchor" class="anchor-grid"></div>
+          </div>
+          <button id="btnResetAll" class="btn small full">Quitar ajustes individuales</button>
+        </div>
       </section>
 
+      <!-- FOTOS -->
       <section>
-        <h3>Ajuste general <span class="muted small">(todas las imágenes)</span></h3>
-        <div class="field">
-          <label>Tamaño <span id="gScaleVal" class="val"></span></label>
-          <input id="gScale" type="range" min="2" max="100" value="30" />
-        </div>
-        <div class="field">
-          <label>Opacidad <span id="gOpacityVal" class="val"></span></label>
-          <input id="gOpacity" type="range" min="5" max="100" value="50" />
-        </div>
-        <div class="field">
-          <label>Margen <span id="gMarginVal" class="val"></span></label>
-          <input id="gMargin" type="range" min="0" max="20" value="3" />
-        </div>
-        <div class="field">
-          <label>Posición</label>
-          <div id="gAnchor" class="anchor-grid"></div>
-        </div>
-        <button id="btnResetAll" class="btn small full">Quitar ajustes individuales</button>
-      </section>
-
-      <section>
-        <h3>Exportar</h3>
+        <h3>📷 Fotos</h3>
         <div class="field row">
           <label class="radio"><input type="radio" name="fmt" value="jpg" checked /> JPG</label>
           <label class="radio"><input type="radio" name="fmt" value="png" /> PNG</label>
         </div>
-        <div class="field" id="qualityField">
-          <label>Calidad JPG <span id="qualityVal" class="val"></span></label>
-          <input id="quality" type="range" min="40" max="100" value="92" />
-        </div>
-        <div class="field" id="limitField">
-          <label class="check"><input id="limitOn" type="checkbox" /> Limitar peso a</label>
-          <div class="inline"><input id="limitKB" type="number" min="20" step="10" value="300" /> KB por foto</div>
+        <div id="jpgOnly">
+          <div class="field">
+            <label>Peso máximo por foto</label>
+            <select id="limitPreset">
+              <option value="0">Sin límite (máxima calidad)</option>
+              <option value="100">100 KB · preview rápida</option>
+              <option value="300">300 KB · WhatsApp / redes</option>
+              <option value="500">500 KB · web liviana</option>
+              <option value="1024">1 MB · web buena calidad</option>
+              <option value="2048">2 MB · alta calidad</option>
+              <option value="3072">3 MB · alta calidad</option>
+              <option value="5120">5 MB · casi original</option>
+              <option value="custom">Personalizado…</option>
+            </select>
+            <div id="customKBRow" class="inline hidden" style="margin-top:6px"><input id="limitKB" type="number" min="20" step="10" value="800" /> KB</div>
+            <div id="limitHint" class="hint"></div>
+          </div>
+          <div class="field">
+            <label>Calidad JPG máxima <span id="qualityVal" class="val"></span></label>
+            <input id="quality" type="range" min="40" max="100" value="92" />
+          </div>
         </div>
         <div class="field">
           <label class="check"><input id="resizeOn" type="checkbox" /> Reducir lado mayor a</label>
           <div class="inline"><input id="maxEdge" type="number" min="200" step="100" value="2048" /> px</div>
-          <div class="muted small">Desmarcado = resolución original.</div>
+        </div>
+        <div class="muted small">Tip: abre una foto y usa <b>Comparar</b> para ver cuánta calidad se pierde antes de exportar.</div>
+      </section>
+
+      <!-- VIDEOS -->
+      <section>
+        <h3>🎬 Videos</h3>
+        <div id="noFfmpeg" class="note warn hidden">No se encontró el motor de video.</div>
+        <div class="field">
+          <label>Compresión</label>
+          <select id="vQuality">
+            <option value="max">Máxima calidad (casi sin pérdida)</option>
+            <option value="high">Alta calidad</option>
+            <option value="balanced">Equilibrada (recomendada)</option>
+            <option value="light">Liviana</option>
+            <option value="tiny">Muy liviana</option>
+            <option value="target">Peso objetivo (MB)…</option>
+          </select>
+          <div id="targetRow" class="inline hidden" style="margin-top:6px"><input id="vTargetMB" type="number" min="1" step="5" value="50" /> MB por video</div>
+          <div id="vHint" class="hint"></div>
         </div>
         <div class="field">
-          <label>Carpeta de salida</label>
+          <label>Formato</label>
+          <select id="vCodec">
+            <option value="h264">MP4 H.264 · compatible con todo</option>
+            <option value="h265">MP4 H.265 · ~40% menos peso</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Resolución</label>
+          <select id="vRes">
+            <option value="orig">Original</option>
+            <option value="2160">4K (2160p)</option>
+            <option value="1440">1440p</option>
+            <option value="1080">Full HD (1080p)</option>
+            <option value="720">HD (720p)</option>
+            <option value="540">540p</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Velocidad</label>
+          <select id="vSpeed">
+            <option value="veryfast">Rápida (archivo un poco más pesado)</option>
+            <option value="medium">Normal</option>
+            <option value="slow">Lenta (mejor compresión)</option>
+          </select>
+        </div>
+      </section>
+
+      <!-- SALIDA -->
+      <section>
+        <h3>Exportar</h3>
+        <div class="field">
+          <label>Carpeta de salida <span class="val small">(mismo orden de subcarpetas)</span></label>
           <div class="inline">
             <span id="outLabel" class="muted ellipsis small grow">—</span>
             <button id="btnOut" class="btn small">Cambiar</button>
           </div>
+          <button id="btnOutReset" class="link small hidden">Usar carpeta automática</button>
         </div>
         <button id="btnExport" class="btn primary full big" disabled>Exportar</button>
       </section>
@@ -81,15 +151,21 @@
     <main id="main" class="main">
       <div id="empty" class="empty-state">
         <div class="big-icon">🗂</div>
-        <h2>Abre una carpeta con tus fotos</h2>
-        <p class="muted">O arrastra la carpeta aquí. Luego elige tu logo PNG.</p>
+        <h2>Abre una carpeta con tus fotos y videos</h2>
+        <p class="muted">Se incluyen todas las subcarpetas y se respeta su orden al exportar.<br>También puedes arrastrar la carpeta aquí.</p>
         <button class="btn primary" id="btnFolder2">📁 Abrir carpeta</button>
       </div>
+      <div id="scanning" class="empty-state hidden"><div class="spinner"></div><p class="muted">Leyendo carpeta…</p></div>
       <div id="toolbar" class="toolbar hidden">
-        <span id="countLabel"></span>
+        <div class="seg" id="filterSeg">
+          <button data-f="all" class="on">Todo</button>
+          <button data-f="image">Fotos</button>
+          <button data-f="video">Videos</button>
+        </div>
+        <span id="countLabel" class="muted"></span>
         <div class="spacer"></div>
-        <button id="selAll" class="link small">Marcar todas</button>
-        <button id="selNone" class="link small">Desmarcar todas</button>
+        <button id="selAll" class="link small">Marcar todo</button>
+        <button id="selNone" class="link small">Desmarcar todo</button>
       </div>
       <div id="grid" class="grid"></div>
     </main>
@@ -103,6 +179,7 @@
         <img class="photo" id="edPhoto" alt="" />
         <img class="logo draggable" id="edLogo" alt="" draggable="false" />
       </div>
+      <div id="stageMsg" class="stage-msg hidden"></div>
       <button class="nav next" id="nextImg" title="Siguiente (→)">›</button>
     </div>
     <aside class="editor-panel">
@@ -110,30 +187,55 @@
         <h3 class="grow ellipsis" id="edName"></h3>
         <button class="btn small" id="edClose" title="Cerrar (Esc)">✕</button>
       </div>
+      <div class="muted small ellipsis" id="edFolder"></div>
       <div class="muted small" id="edInfo"></div>
-      <div id="edMode" class="pill"></div>
-      <p class="muted small">Arrastra el logo sobre la foto para moverlo. Los cambios aquí afectan <b>solo a esta imagen</b>.</p>
-      <div class="field">
-        <label>Tamaño <span id="eScaleVal" class="val"></span></label>
-        <input id="eScale" type="range" min="2" max="100" />
+
+      <div id="edWm">
+        <div id="edMode" class="pill"></div>
+        <p class="muted small">Arrastra el logo para moverlo (rueda del mouse = tamaño). Los cambios aquí afectan <b>solo a este archivo</b>.</p>
+        <div class="field">
+          <label>Tamaño <span id="eScaleVal" class="val"></span></label>
+          <input id="eScale" type="range" min="2" max="100" />
+        </div>
+        <div class="field">
+          <label>Opacidad <span id="eOpacityVal" class="val"></span></label>
+          <input id="eOpacity" type="range" min="5" max="100" />
+        </div>
+        <div class="field">
+          <label>Margen <span id="eMarginVal" class="val"></span></label>
+          <input id="eMargin" type="range" min="0" max="20" />
+        </div>
+        <div class="field">
+          <label>Posición</label>
+          <div id="eAnchor" class="anchor-grid"></div>
+        </div>
+        <div class="stack">
+          <button class="btn full" id="edReset">↺ Volver al ajuste general</button>
+          <button class="btn full" id="edApplyAll">Usar este ajuste para todos</button>
+        </div>
       </div>
-      <div class="field">
-        <label>Opacidad <span id="eOpacityVal" class="val"></span></label>
-        <input id="eOpacity" type="range" min="5" max="100" />
+
+      <div class="panel-block" id="cmpBox">
+        <h4>Comparar calidad final</h4>
+        <div class="seg full" id="viewSeg">
+          <button data-v="edit" class="on">Editar</button>
+          <button data-v="orig">Original</button>
+          <button data-v="out">Resultado</button>
+        </div>
+        <label class="check" style="margin-top:8px"><input type="checkbox" id="zoom100" /> Ver al 100% (píxel real)</label>
+        <div id="cmpInfo" class="cmp-info muted small">Elige "Resultado" para ver la foto tal como se exportará con el peso y calidad configurados. Activa 100% para revisar bandas de color o bloques.</div>
       </div>
-      <div class="field">
-        <label>Margen <span id="eMarginVal" class="val"></span></label>
-        <input id="eMargin" type="range" min="0" max="20" />
+
+      <div class="panel-block" id="vidBox">
+        <h4>Video</h4>
+        <div class="stack">
+          <button class="btn full" id="vidOpen">▶ Reproducir original</button>
+          <button class="btn full" id="vidEstimate">Estimar peso final</button>
+        </div>
+        <div id="vidInfo" class="cmp-info muted small"></div>
       </div>
-      <div class="field">
-        <label>Posición</label>
-        <div id="eAnchor" class="anchor-grid"></div>
-      </div>
-      <label class="check"><input type="checkbox" id="edInclude" /> Incluir en exportación</label>
-      <div class="stack">
-        <button class="btn full" id="edReset">↺ Volver al ajuste general</button>
-        <button class="btn full" id="edApplyAll">Usar este ajuste para todas</button>
-      </div>
+
+      <label class="check" style="margin-top:14px"><input type="checkbox" id="edInclude" /> Incluir en exportación</label>
     </aside>
   </div>
 
@@ -143,6 +245,7 @@
       <h3 id="progTitle">Exportando…</h3>
       <div class="bar"><div id="progBar"></div></div>
       <div id="progText" class="muted small"></div>
+      <div class="bar thin" id="fileBarWrap"><div id="fileBar"></div></div>
       <div class="inline end" id="progActions"></div>
     </div>
   </div>
